@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tesla Roadster 4-Thruster Autonomous Landing | 3D Visualizer</title>
+  
+  <!-- Three.js and OrbitControls from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <!-- Pre-computed flight trajectory dataset from export_trajectories.py -->
+  <script src="trajectories.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: #0a0c10;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #webgl-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* Top Navigation HUD */
+    .hud-header {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .hud-title-card {
+      background: rgba(13, 17, 23, 0.85);
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      border-radius: 8px;
+      padding: 10px 18px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .hud-title-card h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: #58a6ff;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .hud-title-card p {
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      background: rgba(35, 134, 54, 0.25);
+      color: #3fb950;
+      border: 1px solid rgba(63, 185, 80, 0.4);
+      backdrop-filter: blur(8px);
+    }
+
+    /* Left Telemetry Panel */
+    .hud-left-panel {
+      position: absolute;
+      top: 85px;
+      left: 20px;
+      width: 250px;
+      background: rgba(13, 17, 23, 0.85);
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      border-radius: 8px;
+      padding: 14px;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+    }
+
+    .panel-heading {
+      font-size: 11px;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.8);
+      padding-bottom: 5px;
+    }
+
+    .telemetry-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .telemetry-label {
+      font-size: 12px;
+      color: #c9d1d9;
+    }
+
+    .telemetry-value {
+      font-size: 14px;
+      font-weight: 700;
+      font-family: "SF Mono", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      color: #58a6ff;
+    }
+
+    .telemetry-value.safe {
+      color: #3fb950;
+    }
+
+    .telemetry-value.warn {
+      color: #f0883e;
+    }
+
+    .telemetry-value.danger {
+      color: #f85149;
+    }
+
+    /* Artificial Horizon Canvas */
+    #horizon-canvas {
+      display: block;
+      width: 100%;
+      height: 70px;
+      margin-top: 10px;
+      border-radius: 4px;
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      background: #0d1117;
+    }
+
+    /* Right Thruster Matrix Panel */
+    .hud-right-panel {
+      position: absolute;
+      top: 85px;
+      right: 20px;
+      width: 250px;
+      background: rgba(13, 17, 23, 0.85);
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      border-radius: 8px;
+      padding: 14px;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+    }
+
+    .thruster-bar-container {
+      margin-bottom: 10px;
+    }
+
+    .thruster-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #c9d1d9;
+    }
+
+    .thruster-progress-bg {
+      width: 100%;
+      height: 7px;
+      background: rgba(48, 54, 61, 0.6);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .thruster-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #1f6feb, #58a6ff);
+      border-radius: 4px;
+      transition: width 0.05s ease;
+    }
+
+    .thruster-progress-fill.hot {
+      background: linear-gradient(90deg, #f0883e, #f85149);
+    }
+
+    /* Bottom Interactive Controller Bar */
+    .hud-bottom-bar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 40px);
+      max-width: 900px;
+      background: rgba(13, 17, 23, 0.90);
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      border-radius: 12px;
+      padding: 14px 20px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      pointer-events: auto;
+    }
+
+    .stunt-buttons-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .stunt-btn {
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stunt-btn:hover {
+      background: #30363d;
+      color: #ffffff;
+      border-color: #8b949e;
+    }
+
+    .stunt-btn.active {
+      background: #1f6feb;
+      color: #ffffff;
+      border-color: #58a6ff;
+      box-shadow: 0 0 12px rgba(31, 111, 235, 0.5);
+    }
+
+    .stunt-btn.danger.active {
+      background: #da3633;
+      border-color: #f85149;
+      box-shadow: 0 0 12px rgba(218, 54, 51, 0.5);
+    }
+
+    .playback-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .play-btn {
+      background: #238636;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .play-btn:hover {
+      background: #2ea043;
+    }
+
+    .timeline-slider {
+      flex: 1;
+      accent-color: #58a6ff;
+      cursor: pointer;
+    }
+
+    .time-readout {
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 12px;
+      color: #8b949e;
+      min-width: 65px;
+      text-align: right;
+    }
+
+    .cam-btn {
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .cam-btn.active {
+      color: #58a6ff;
+      border-color: #58a6ff;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- WebGL Render Canvas -->
+  <div id="webgl-canvas"></div>
+
+  <!-- Header HUD -->
+  <div class="hud-header">
+    <div class="hud-title-card">
+      <h1>Tesla Roadster SpaceX Thruster Lander</h1>
+      <p>Autonomous 6-DoF Inverted Flip & Semi Truck Leap via Reinforcement Learning (PPO)</p>
+    </div>
+    <div id="hud-status" class="status-badge">STANDBY</div>
+  </div>
+
+  <!-- Left Telemetry Panel -->
+  <div class="hud-left-panel">
+    <div class="panel-heading">Vehicle Telemetry</div>
+    
+    <div class="telemetry-row">
+      <span class="telemetry-label">Controller</span>
+      <span id="tel-agent" class="telemetry-value">RL (PPO)</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Altitude (Z)</span>
+      <span id="tel-alt" class="telemetry-value">25.00 m</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Vertical Speed (Vz)</span>
+      <span id="tel-vz" class="telemetry-value">-1.00 m/s</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Forward Pos (X)</span>
+      <span id="tel-x" class="telemetry-value">0.00 m</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Roll Angle</span>
+      <span id="tel-roll" class="telemetry-value">180.0 deg</span>
+    </div>
+
+    <div class="telemetry-row">
+      <span class="telemetry-label">Pitch Angle</span>
+      <span id="tel-pitch" class="telemetry-value">0.0 deg</span>
+    </div>
+
+    <canvas id="horizon-canvas" width="220" height="70"></canvas>
+  </div>
+
+  <!-- Right Thruster Matrix Panel -->
+  <div class="hud-right-panel">
+    <div class="panel-heading">Active Thruster Matrix</div>
+
+    <div class="thruster-bar-container">
+      <div class="thruster-label-row">
+        <span>Front-Left (FL)</span>
+        <span id="thrust-val-fl">0%</span>
+      </div>
+      <div class="thruster-progress-bg">
+        <div id="thrust-bar-fl" class="thruster-progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="thruster-bar-container">
+      <div class="thruster-label-row">
+        <span>Front-Right (FR)</span>
+        <span id="thrust-val-fr">0%</span>
+      </div>
+      <div class="thruster-progress-bg">
+        <div id="thrust-bar-fr" class="thruster-progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="thruster-bar-container">
+      <div class="thruster-label-row">
+        <span>Rear-Left (RL)</span>
+        <span id="thrust-val-rl">0%</span>
+      </div>
+      <div class="thruster-progress-bg">
+        <div id="thrust-bar-rl" class="thruster-progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="thruster-bar-container">
+      <div class="thruster-label-row">
+        <span>Rear-Right (RR)</span>
+        <span id="thrust-val-rr">0%</span>
+      </div>
+      <div class="thruster-progress-bg">
+        <div id="thrust-bar-rr" class="thruster-progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="panel-heading" style="margin-top: 14px;">Flight Outcome</div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">Final Event</span>
+      <span id="tel-outcome" class="telemetry-value safe">--</span>
+    </div>
+    <div class="telemetry-row">
+      <span class="telemetry-label">Touchdown Speed</span>
+      <span id="tel-final-vz" class="telemetry-value">--</span>
+    </div>
+  </div>
+
+  <!-- Bottom Interactive Controls Bar -->
+  <div class="hud-bottom-bar">
+    <div class="stunt-buttons-row">
+      <button id="btn-s1-rl" class="stunt-btn active" onclick="loadStunt('stunt1_rl')">
+        🎬 Stunt 1: 180° Inverted Flip (RL Agent)
+      </button>
+      <button id="btn-s1-pid" class="stunt-btn" onclick="loadStunt('stunt1_pid')">
+        ⚠️ Stunt 1: Inverted Drop (PID Baseline)
+      </button>
+      <button id="btn-s2-rl" class="stunt-btn" onclick="loadStunt('stunt2_rl')">
+        🚀 Stunt 2: Tesla Semi Leap (RL Agent)
+      </button>
+      <button id="btn-s2-pid" class="stunt-btn danger" onclick="loadStunt('stunt2_pid')">
+        ❌ Stunt 2: Semi Leap (PID Failure)
+      </button>
+    </div>
+
+    <div class="playback-controls-row">
+      <button id="play-toggle-btn" class="play-btn" onclick="togglePlay()">PAUSE</button>
+      <input id="timeline-slider" type="range" class="timeline-slider" min="0" max="100" value="0" oninput="onSliderScrub(this.value)">
+      <span id="time-display" class="time-readout">0.00s</span>
+      <button id="cam-toggle-btn" class="cam-btn active" onclick="toggleCameraMode()">Camera: Chase</button>
+      <button class="cam-btn" onclick="resetPlayback()">Restart</button>
+    </div>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // THREE.JS 3D SCENE INITIALIZATION
+    // -------------------------------------------------------------
+    const container = document.getElementById('webgl-canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0d14);
+    scene.fog = new THREE.FogExp2(0x0a0d14, 0.008);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(-18, 12, 28);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI / 2 - 0.02; // Don't go below ground
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xd0e0ff, 0.6);
+    scene.add(ambientLight);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    sunLight.position.set(40, 60, 30);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 150;
+    sunLight.shadow.camera.left = -50;
+    sunLight.shadow.camera.right = 50;
+    sunLight.shadow.camera.top = 50;
+    sunLight.shadow.camera.bottom = -50;
+    scene.add(sunLight);
+
+    // Ground Runway
+    const runwayGeo = new THREE.PlaneGeometry(350, 40);
+    const runwayMat = new THREE.MeshStandardMaterial({
+      color: 0x111620,
+      roughness: 0.85,
+      metalness: 0.1
+    });
+    const runway = new THREE.Mesh(runwayGeo, runwayMat);
+    runway.rotation.x = -Math.PI / 2;
+    runway.receiveShadow = true;
+    scene.add(runway);
+
+    // Runway Centerline Grid
+    const gridHelper = new THREE.GridHelper(350, 70, 0x58a6ff, 0x21262d);
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
+
+    // Glowing Target Landing Pad Bullseye
+    function createLandingPad(xPos) {
+      const padGroup = new THREE.Group();
+      padGroup.position.set(xPos, 0.02, 0);
+
+      const ring1 = new THREE.Mesh(
+        new THREE.RingGeometry(3.5, 3.8, 32),
+        new THREE.MeshBasicMaterial({ color: 0x3fb950, side: THREE.DoubleSide })
+      );
+      ring1.rotation.x = Math.PI / 2;
+      padGroup.add(ring1);
+
+      const ring2 = new THREE.Mesh(
+        new THREE.RingGeometry(1.2, 1.5, 32),
+        new THREE.MeshBasicMaterial({ color: 0x58a6ff, side: THREE.DoubleSide })
+      );
+      ring2.rotation.x = Math.PI / 2;
+      padGroup.add(ring2);
+
+      return padGroup;
+    }
+    const pad1 = createLandingPad(0);
+    const pad2 = createLandingPad(35);
+    scene.add(pad1);
+    scene.add(pad2);
+
+    // -------------------------------------------------------------
+    // PROCEDURAL TESLA ROADSTER 3D MODEL
+    // -------------------------------------------------------------
+    const carGroup = new THREE.Group();
+
+    // Chassis dimensions: Length=4.5, Width=2.0, Height=1.2
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xd81f26, // Metallic Tesla Red
+      metalness: 0.8,
+      roughness: 0.25
+    });
+
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x05070a,
+      metalness: 0.9,
+      roughness: 0.1,
+      transparent: true,
+      opacity: 0.85
+    });
+
+    const wheelMat = new THREE.MeshStandardMaterial({
+      color: 0x161b22,
+      roughness: 0.9
+    });
+
+    // Main Lower Body
+    const lowerBody = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.6, 2.0), bodyMat);
+    lowerBody.position.y = 0.3;
+    lowerBody.castShadow = true;
+    carGroup.add(lowerBody);
+
+    // Cabin / Canopy
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 1.6), glassMat);
+    cabin.position.set(-0.2, 0.8, 0);
+    cabin.castShadow = true;
+    carGroup.add(cabin);
+
+    // Headlights and Tail light strip
+    const headLightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const headLights = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 1.6), headLightMat);
+    headLights.position.set(2.2, 0.35, 0);
+    carGroup.add(headLights);
+
+    const tailLightMat = new THREE.MeshBasicMaterial({ color: 0xff1a1a });
+    const tailLights = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.8), tailLightMat);
+    tailLights.position.set(-2.2, 0.45, 0);
+    carGroup.add(tailLights);
+
+    // 4 Wheels
+    function makeWheel(x, z) {
+      const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.25, 24);
+      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.0, z);
+      wheel.castShadow = true;
+      return wheel;
+    }
+    carGroup.add(makeWheel(1.4, 0.95));   // Front-Left
+    carGroup.add(makeWheel(1.4, -0.95));  // Front-Right
+    carGroup.add(makeWheel(-1.4, 0.95));  // Rear-Left
+    carGroup.add(makeWheel(-1.4, -0.95)); // Rear-Right
+
+    // 4 Corner Thruster Plumes (Flame Cones)
+    const flameMat = new THREE.MeshBasicMaterial({
+      color: 0x38d9a9, // Cyan-green hot rocket exhaust
+      transparent: true,
+      opacity: 0.85
+    });
+
+    const thrusterFlames = [];
+    const nozzlePositions = [
+      [1.4, 0.85],   // FL
+      [1.4, -0.85],  // FR
+      [-1.4, 0.85],  // RL
+      [-1.4, -0.85]  // RR
+    ];
+
+    nozzlePositions.forEach(([nx, nz]) => {
+      // Small metallic nozzle cup
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.08, 0.15, 16), wheelMat);
+      cup.position.set(nx, 0.02, nz);
+      carGroup.add(cup);
+
+      // Downward exhaust flame cone
+      const coneGeo = new THREE.ConeGeometry(0.25, 1.6, 16);
+      coneGeo.translate(0, -0.8, 0); // Origin at top of cone
+      const flame = new THREE.Mesh(coneGeo, flameMat);
+      flame.position.set(nx, 0.0, nz);
+      flame.scale.set(0.001, 0.001, 0.001); // Hidden initially
+      carGroup.add(flame);
+      thrusterFlames.push(flame);
+    });
+
+    scene.add(carGroup);
+
+    // -------------------------------------------------------------
+    // PROCEDURAL TESLA SEMI TRUCK OBSTACLE (At x=0m)
+    // -------------------------------------------------------------
+    const truckGroup = new THREE.Group();
+    truckGroup.position.set(0, 0, 0);
+
+    const semiMat = new THREE.MeshStandardMaterial({
+      color: 0xd0d7de,
+      metalness: 0.6,
+      roughness: 0.3
+    });
+
+    // Cab (Front tractor)
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.8, 3.8, 2.5), semiMat);
+    cab.position.set(-2.5, 1.9, 0);
+    cab.castShadow = true;
+    truckGroup.add(cab);
+
+    // Cab Windshield
+    const semiGlass = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.6, 2.3), glassMat);
+    semiGlass.position.set(-2.2, 2.8, 0);
+    truckGroup.add(semiGlass);
+
+    // Cargo Trailer
+    const trailerMat = new THREE.MeshStandardMaterial({
+      color: 0x8b949e,
+      metalness: 0.3,
+      roughness: 0.6
+    });
+    const trailer = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.5, 2.4), trailerMat);
+    trailer.position.set(1.4, 2.0, 0);
+    trailer.castShadow = true;
+    truckGroup.add(trailer);
+
+    scene.add(truckGroup);
+
+    // -------------------------------------------------------------
+    // PLAYBACK & TELEMETRY CONTROLLER
+    // -------------------------------------------------------------
+    let currentTrajectoryKey = 'stunt1_rl';
+    let currentFrames = [];
+    let currentSummary = null;
+    let currentFrameIdx = 0;
+    let isPlaying = true;
+    let isChaseCam = true;
+
+    function loadStunt(key) {
+      if (!window.ROADSTER_TELEMETRY || !window.ROADSTER_TELEMETRY[key]) {
+        console.warn('Dataset key not found:', key);
+        return;
+      }
+
+      currentTrajectoryKey = key;
+      currentFrames = window.ROADSTER_TELEMETRY[key].frames;
+      currentSummary = window.ROADSTER_TELEMETRY[key].summary;
+      currentFrameIdx = 0;
+
+      // Update button active states
+      document.querySelectorAll('.stunt-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById('btn-' + key.replace('_', '-'));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      // Update HUD summaries
+      document.getElementById('tel-agent').textContent = currentSummary.agent;
+      document.getElementById('tel-outcome').textContent = currentSummary.final_event.toUpperCase();
+      document.getElementById('tel-outcome').className = 'telemetry-value ' + (currentSummary.final_event === 'successful_landing' ? 'safe' : 'danger');
+      document.getElementById('tel-final-vz').textContent = currentSummary.final_vz + ' m/s';
+
+      // Hide or show truck obstacle depending on stunt
+      if (currentSummary.mode === 'leap') {
+        truckGroup.visible = true;
+        pad1.visible = false;
+        pad2.visible = true;
+      } else {
+        truckGroup.visible = false;
+        pad1.visible = true;
+        pad2.visible = false;
+      }
+
+      document.getElementById('timeline-slider').max = currentFrames.length - 1;
+      document.getElementById('timeline-slider').value = 0;
+    }
+
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      document.getElementById('play-toggle-btn').textContent = isPlaying ? 'PAUSE' : 'PLAY';
+    }
+
+    function resetPlayback() {
+      currentFrameIdx = 0;
+      isPlaying = true;
+      document.getElementById('play-toggle-btn').textContent = 'PAUSE';
+    }
+
+    function onSliderScrub(val) {
+      currentFrameIdx = parseInt(val, 10);
+      isPlaying = false;
+      document.getElementById('play-toggle-btn').textContent = 'PLAY';
+      applyFrame(currentFrameIdx);
+    }
+
+    function toggleCameraMode() {
+      isChaseCam = !isChaseCam;
+      const btn = document.getElementById('cam-toggle-btn');
+      btn.textContent = isChaseCam ? 'Camera: Chase' : 'Camera: Free Orbit';
+      btn.classList.toggle('active', isChaseCam);
+    }
+
+    // Apply specific physics frame to 3D models and HUD
+    function applyFrame(idx) {
+      if (!currentFrames || currentFrames.length === 0 || idx >= currentFrames.length) return;
+      const f = currentFrames[idx];
+
+      // Update 3D car position
+      carGroup.position.set(f.pos[0], f.pos[2], f.pos[1]);
+
+      // Update 3D car rotation (Euler: roll around X, pitch around Y, yaw around Z)
+      carGroup.rotation.order = 'ZYX';
+      carGroup.rotation.x = -f.rot_rad[0]; // Roll corrected for Newton's Third Law Action-Reaction
+      carGroup.rotation.z = -f.rot_rad[1]; // Pitch mapped to Three.js axis
+      carGroup.rotation.y = f.rot_rad[2]; // Yaw
+
+      // Update thruster flame scale and intensity
+      f.throttles.forEach((throttle, i) => {
+        const flame = thrusterFlames[i];
+        if (throttle > 0.05) {
+          flame.scale.set(1.0, throttle * 1.8, 1.0);
+          flame.visible = true;
+          // Shift color to orange if throttle is above 80%
+          flame.material.color.setHex(throttle > 0.8 ? 0xff7b00 : 0x38d9a9);
+        } else {
+          flame.visible = false;
+        }
+      });
+
+      // Update HUD Numbers
+      document.getElementById('tel-alt').textContent = f.pos[2].toFixed(2) + ' m';
+      document.getElementById('tel-vz').textContent = f.vel[2].toFixed(2) + ' m/s';
+      document.getElementById('tel-x').textContent = f.pos[0].toFixed(2) + ' m';
+      document.getElementById('tel-roll').textContent = f.rot[0].toFixed(1) + ' deg';
+      document.getElementById('tel-pitch').textContent = f.rot[1].toFixed(1) + ' deg';
+
+      // Speed color badge
+      const vzElem = document.getElementById('tel-vz');
+      if (Math.abs(f.vel[2]) < 2.5) {
+        vzElem.className = 'telemetry-value safe';
+      } else if (Math.abs(f.vel[2]) < 6.0) {
+        vzElem.className = 'telemetry-value warn';
+      } else {
+        vzElem.className = 'telemetry-value danger';
+      }
+
+      // Update Status Badge
+      const statusElem = document.getElementById('hud-status');
+      if (f.event === 'successful_landing') {
+        statusElem.textContent = 'TOUCHDOWN - SAFE 4-WHEEL LANDING!';
+        statusElem.style.background = 'rgba(35, 134, 54, 0.4)';
+        statusElem.style.color = '#3fb950';
+      } else if (f.event === 'crash_landing' || f.event === 'truck_collision') {
+        statusElem.textContent = 'CRASH DETECTED';
+        statusElem.style.background = 'rgba(218, 54, 51, 0.4)';
+        statusElem.style.color = '#f85149';
+      } else if (Math.abs(f.rot[0]) > 40) {
+        statusElem.textContent = 'FLIPPING 180° IN MID-AIR';
+        statusElem.style.background = 'rgba(31, 111, 235, 0.4)';
+        statusElem.style.color = '#58a6ff';
+      } else if (f.pos[0] >= -5 && f.pos[0] <= 5 && currentSummary && currentSummary.mode === 'leap') {
+        statusElem.textContent = 'FLYING OVER TESLA SEMI';
+        statusElem.style.background = 'rgba(210, 153, 34, 0.4)';
+        statusElem.style.color = '#d29922';
+      } else {
+        statusElem.textContent = 'IN FLIGHT';
+        statusElem.style.background = 'rgba(56, 139, 253, 0.2)';
+        statusElem.style.color = '#58a6ff';
+      }
+
+      // Update 4 Thruster Progress Bars
+      const names = ['fl', 'fr', 'rl', 'rr'];
+      f.throttles.forEach((t, i) => {
+        const pct = Math.round(t * 100);
+        document.getElementById(`thrust-val-${names[i]}`).textContent = pct + '%';
+        const bar = document.getElementById(`thrust-bar-${names[i]}`);
+        bar.style.width = pct + '%';
+        bar.classList.toggle('hot', t > 0.8);
+      });
+
+      // Update Timeline Slider and Timer
+      document.getElementById('timeline-slider').value = idx;
+      document.getElementById('time-display').textContent = f.t.toFixed(2) + 's';
+
+      // Draw Mini Artificial Horizon
+      drawHorizon(f.rot_rad[0], f.rot_rad[1]);
+
+      // Chase Camera Logic
+      if (isChaseCam) {
+        controls.target.set(carGroup.position.x, carGroup.position.y + 1.0, carGroup.position.z);
+        camera.position.x = carGroup.position.x - 14.0;
+        camera.position.y = Math.max(6.0, carGroup.position.y + 4.0);
+        camera.position.z = carGroup.position.z + 18.0;
+      }
+    }
+
+    // Artificial Horizon Canvas Renderer
+    const hCanvas = document.getElementById('horizon-canvas');
+    const hCtx = hCanvas.getContext('2d');
+
+    function drawHorizon(roll, pitch) {
+      const w = hCanvas.width;
+      const h = hCanvas.height;
+      hCtx.clearRect(0, 0, w, h);
+
+      hCtx.save();
+      hCtx.translate(w / 2, h / 2);
+      hCtx.rotate(roll);
+
+      const pitchOffset = pitch * 30;
+
+      // Sky (Blue)
+      hCtx.fillStyle = '#1f6feb';
+      hCtx.fillRect(-w, -h * 2 + pitchOffset, w * 2, h * 2);
+
+      // Ground (Brown/Dark)
+      hCtx.fillStyle = '#30363d';
+      hCtx.fillRect(-w, pitchOffset, w * 2, h * 2);
+
+      // Horizon Line
+      hCtx.strokeStyle = '#ffffff';
+      hCtx.lineWidth = 2;
+      hCtx.beginPath();
+      hCtx.moveTo(-w, pitchOffset);
+      hCtx.lineTo(w, pitchOffset);
+      hCtx.stroke();
+
+      hCtx.restore();
+
+      // Center crosshair (Fixed)
+      hCtx.strokeStyle = '#f0883e';
+      hCtx.lineWidth = 2;
+      hCtx.beginPath();
+      hCtx.moveTo(w / 2 - 16, h / 2);
+      hCtx.lineTo(w / 2 + 16, h / 2);
+      hCtx.moveTo(w / 2, h / 2 - 8);
+      hCtx.lineTo(w / 2, h / 2 + 8);
+      hCtx.stroke();
+    }
+
+    // -------------------------------------------------------------
+    // MAIN ANIMATION LOOP
+    // -------------------------------------------------------------
+    let lastTime = performance.now();
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+
+      if (isPlaying && currentFrames && currentFrames.length > 0) {
+        currentFrameIdx++;
+        if (currentFrameIdx >= currentFrames.length) {
+          currentFrameIdx = currentFrames.length - 1;
+          isPlaying = false;
+          document.getElementById('play-toggle-btn').textContent = 'REPLAY';
+        }
+        applyFrame(currentFrameIdx);
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // Window Resize Handler
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Auto-load default stunt on startup
+    window.addEventListener('DOMContentLoaded', () => {
+      loadStunt('stunt1_rl');
+      requestAnimationFrame(animate);
+    });
+  </script>
+</body>
+</html>
+
